@@ -40,6 +40,8 @@ target_price = latest_prices_selected * (1+ mock_price_increase)
 #Fake betas
 betas = pd.Series(np.random.uniform(0.7, 1.3, size = len(randomised_tickers)), index = randomised_tickers) #betas are randomised but can be set to 1 if needed.....
 #chosen uniform, any better dists???
+print("betas")
+print(betas)
 
 #Making the DataFrame from inputs
 
@@ -95,8 +97,8 @@ if problem.status != cp.OPTIMAL:
 inputs_df["optimal_weights"] = np.array(weights_vector.value)
 expected_portfolio_return = returns @ np.array(weights_vector.value) #dot product of return and weights 
 
-
-portfolio_volatility = np.sqrt(np.array(weights_vector.value).T @ new_covariance_matrix @ np.array(weights_vector.value))
+portfolio_volatility_daily = np.sqrt(np.array(weights_vector.value).T @ new_covariance_matrix @ np.array(weights_vector.value))
+portfolio_volatility = portfolio_volatility_daily * np.sqrt(252)  # Annualise volatility
 portfolio_beta = betas @ np.array(weights_vector.value)
 sharpe_ratio = expected_portfolio_return / portfolio_volatility
 
