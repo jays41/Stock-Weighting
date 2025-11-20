@@ -94,12 +94,16 @@ if problem.status != cp.OPTIMAL:
 
 #Task 5
 
-inputs_df["optimal_weights"] = np.array(weights_vector.value)
-expected_portfolio_return = returns @ np.array(weights_vector.value) #dot product of return and weights 
+optimal_weights = np.array(weights_vector.value)
+optimal_weights = np.maximum(optimal_weights, 0)  # Set any tiny negative weights to 0
+optimal_weights = optimal_weights / np.sum(optimal_weights)  # Renormalise so they sum to 1
 
-portfolio_volatility_daily = np.sqrt(np.array(weights_vector.value).T @ new_covariance_matrix @ np.array(weights_vector.value))
+inputs_df["optimal_weights"] = optimal_weights
+expected_portfolio_return = returns @ optimal_weights #dot product of return and weights 
+
+portfolio_volatility_daily = np.sqrt(optimal_weights.T @ new_covariance_matrix @ optimal_weights)
 portfolio_volatility = portfolio_volatility_daily * np.sqrt(252)  # Annualise volatility
-portfolio_beta = betas @ np.array(weights_vector.value)
+portfolio_beta = betas @ optimal_weights
 sharpe_ratio = expected_portfolio_return / portfolio_volatility
 
 # Validate beta neutral constraint
