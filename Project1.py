@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import cvxpy as cp
 from betas import calculate_beta
+from monteCarlo import monte_carlo_sim
 
 MAX_POSITION_SIZE = 0.25  # Maximum weight for any single stock
 MAX_SECTOR_ALLOCATION = 0.40  # Maximum allocation to any single sector
@@ -192,5 +193,13 @@ print("Optimal Weights:")
 print(inputs_df[["ticker_name", "optimal_weights"]].sort_values("optimal_weights"))
 
 
+results = monte_carlo_sim(
+    weights=optimal_weights,
+    expected_returns=returns,
+    cov_matrix=new_covariance_matrix,
+    num_simulations=10000,
+    time_horizon=252  # 1 year
+)
 
-
+print(f"Expected Return: {results['mean_return']:.2%}")
+print(f"VaR (95%): {results['var_95']:.2%}")
