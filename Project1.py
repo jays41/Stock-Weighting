@@ -2,6 +2,7 @@
 import pandas as pd
 import numpy as np
 import cvxpy as cp
+from betas import calculate_beta
 
 #TASK 1:INPUTS
 np.random.seed(20) #seeded to get same results each time, can change when needed
@@ -37,10 +38,23 @@ mock_price_increase = pd.Series(mock_price_increase_values, index= randomised_ti
 target_horizon = pd.Series(np.random.choice([3,6,9,12], size = len(randomised_tickers)), index = randomised_tickers) #can change depending on what target_horizon is desired
 target_price = latest_prices_selected * (1+ mock_price_increase)
 
-#Fake betas
-betas = pd.Series(np.random.uniform(0.7, 1.3, size = len(randomised_tickers)), index = randomised_tickers) #betas are randomised but can be set to 1 if needed.....
-#chosen uniform, any better dists???
-print("betas")
+#Calculate real betas using historical data
+market_data_path = 'data/s&p_data.csv'
+stock_data_path = "data/stock_prices.csv"
+
+betas = calculate_beta(randomised_tickers, start_date, end_date, market_data_path, stock_data_path)
+
+# Drop any stocks with insufficient data (NaN betas)
+valid_betas = betas.dropna()
+dropped_tickers = betas[betas.isna()].index.tolist()
+
+if len(dropped_tickers) > 0:
+    print(f"Dropped {len(dropped_tickers)} tickers due to insufficient data: {dropped_tickers}")
+    print(f"Tickers dropped: {dropped_tickers}")
+
+randomised_tickers = valid_betas.index
+betas = valid_betas
+
 print(betas)
 
 #Making the DataFrame from inputs
