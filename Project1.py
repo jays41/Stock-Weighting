@@ -27,7 +27,6 @@ def optimise_portfolio(data_path):
     MAX_SECTOR_ALLOCATION = 0.40  # Maximum allocation to any single sector
 
     #TASK 1:INPUTS
-    np.random.seed(20) #seeded to get same results each time, can change when needed
 
     stock_prices = pd.read_csv(r"data\stock_prices.csv", parse_dates = ["date"])
     #clarification, parse_dates added for DateTime casting
