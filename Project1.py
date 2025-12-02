@@ -4,6 +4,8 @@ import numpy as np
 import cvxpy as cp
 from betas import calculate_beta
 from monteCarlo import monte_carlo_sim
+import warnings
+warnings.filterwarnings('ignore', category=RuntimeWarning)
 
 def optimise_portfolio(data_path):
     target_data = {}
@@ -21,10 +23,9 @@ def optimise_portfolio(data_path):
                 }
     
     input_tickers = list(target_data.keys())
-    print(f"Input tickers from file: {input_tickers}")
 
-    MAX_POSITION_SIZE = 0.25  # Maximum weight for any single stock
-    MAX_SECTOR_ALLOCATION = 0.40  # Maximum allocation to any single sector
+    MAX_POSITION_SIZE = 1 # 0.25  # Maximum weight for any single stock
+    MAX_SECTOR_ALLOCATION = 1 # 0.40  # Maximum allocation to any single sector
 
     #TASK 1:INPUTS
 
@@ -45,7 +46,6 @@ def optimise_portfolio(data_path):
     
     if len(qualified_input_tickers) == 0:
         print("ERROR: No input tickers have sufficient trading data (>= 150 days)")
-        print(f"Available tickers with sufficient data: {all_qualified_tickers.tolist()[:10]}...")  # Show first 10
         return
     
     if len(qualified_input_tickers) < len(input_tickers):
@@ -54,83 +54,66 @@ def optimise_portfolio(data_path):
     
     randomised_tickers = pd.Index(qualified_input_tickers)
 
-    latest_data = filtered_data.sort_values("date").groupby("ticker").tail(1).set_index("ticker") #Oldest to newest with last row(recent closing price)
-    latest_price = latest_data["close"]
-    sectors = latest_data["sector"]
+    latest_data = filtered_data.sort_values("date").groupby("ticker").tail(1).set_index("ticker")
+    latest_price = latest_data["close"].reindex(randomised_tickers)
+    sectors = latest_data["sector"].reindex(randomised_tickers)
 
-    latest_prices_selected = latest_price.reindex(randomised_tickers)
-    sectors_selected = sectors.reindex(randomised_tickers)
-
-    # Use real target prices and horizons from the input file
-    target_price_list = [target_data[ticker]['target_price'] for ticker in randomised_tickers]
-    target_horizon_list = [target_data[ticker]['target_horizon'] for ticker in randomised_tickers]
+    target_prices = [target_data[ticker]['target_price'] for ticker in randomised_tickers]
+    target_horizons = [target_data[ticker]['target_horizon'] for ticker in randomised_tickers]
     
-    target_price = pd.Series(target_price_list, index=randomised_tickers)
-    target_horizon = pd.Series(target_horizon_list, index=randomised_tickers)
-    
-    # Calculate the implied price increases
-    price_increase = (target_price / latest_prices_selected) - 1
-    print(f"\nImplied price increases:")
-    for ticker in randomised_tickers:
-        print(f"{ticker}: {price_increase[ticker]:.1%} (${latest_prices_selected[ticker]:.2f} -> ${target_price[ticker]:.2f} in {target_horizon[ticker]} months)")
-
-    #Calculate real betas using historical data
     market_data_path = r'data\s&p_data.csv'
     stock_data_path = r"data\stock_prices.csv"
-
-    betas = calculate_beta(randomised_tickers, start_date, end_date, market_data_path, stock_data_path)
-
-    # Drop any stocks with insufficient data (NaN betas)
-    valid_betas = betas.dropna()
-    dropped_tickers = betas[betas.isna()].index.tolist()
-
-    if len(dropped_tickers) > 0:
-        print(f"Dropped {len(dropped_tickers)} tickers due to insufficient data: {dropped_tickers}")
-        print(f"Tickers dropped: {dropped_tickers}")
-
-    randomised_tickers = valid_betas.index
-    betas = valid_betas
-
-    print(betas)
+    betas = calculate_beta(randomised_tickers, start_date, end_date, market_data_path, stock_data_path).dropna()
+    
+    # only keep tickers with valid betas
+    final_tickers = betas.index
+    if len(final_tickers) != len(randomised_tickers):
+        print(f"Dropped {len(randomised_tickers) - len(final_tickers)} tickers due to insufficient beta data")
+    
+    latest_price = latest_price.reindex(final_tickers)
+    sectors = sectors.reindex(final_tickers)
+    target_prices = [target_data[ticker]['target_price'] for ticker in final_tickers]
+    target_horizons = [target_data[ticker]['target_horizon'] for ticker in final_tickers]
+    betas = betas.reindex(final_tickers)
 
     #Making the DataFrame from inputs
 
     inputs_df = pd.DataFrame({
-        "ticker_name": randomised_tickers,
-        "latest_price": latest_prices_selected.values,
-        "target_price": target_price.values,
-        "target_horizon": target_horizon.values,
+        "ticker_name": final_tickers,
+        "latest_price": latest_price.values,
+        "target_price": target_prices,
+        "target_horizon": target_horizons,
         "beta": betas.values,
-        "sector": sectors_selected.values
-
+        "sector": sectors.values
     })
 
-    #Task 2 Expected Returns
+    def expected_return(target_price, current_price, horizon_months):
+        ratio = target_price / current_price
+        annual_factor = 12.0 / horizon_months
+        expected_return = (ratio ** annual_factor) - 1
+        return min(expected_return, 10.0)  # Cap at 1000%
+    
+    inputs_df["expected_return"] = [
+        expected_return(row["target_price"], row["latest_price"], row["target_horizon"])
+        for _, row in inputs_df.iterrows()
+    ]
 
+    price_set = filtered_data[filtered_data["ticker"].isin(final_tickers)].copy()
+    price_set = price_set.sort_values(["ticker", "date"])
+    price_set["daily_return"] = price_set.groupby("ticker")["close"].pct_change()
+    price_set["daily_return"] = price_set["daily_return"].clip(-0.5, 0.5)  # Cap extreme returns
+    
+    new_returns = price_set.pivot(index="date", columns="ticker", values="daily_return").fillna(0)
+    covariance_matrix = new_returns.cov()
 
-
-    inputs_df["expected_return"] = (((inputs_df["target_price"]/ inputs_df["latest_price"])) ** (12/inputs_df["target_horizon"]) -1) #Expected return formula 
-
-
-    #Task 3 Covariance variance Matrix
-
-    price_set = filtered_data[filtered_data["ticker"].isin(randomised_tickers)].copy() # selecting the prices from the price dataset with respect to the chosen qualified tickers
-    price_set = price_set.sort_values(["ticker", "date"]) #reformatting columns
-    price_set["daily_return"] = price_set.groupby("ticker")["close"].pct_change() #percentage change of each ticker within each date
-    new_returns = price_set.pivot(index = "date", columns = "ticker", values = "daily_return") #just for helping with visualisation- ticker vs date col, row
-    covariance_matrix = new_returns.cov() #ticker vs ticker matrix
-
-
-
-    #Task 4 -Put returns + beta here, conditions: low risk, fully-invested, in line with S&P benchmark
 
     returns = inputs_df["expected_return"].values
     betas = inputs_df["beta"].values
     sectors = inputs_df["sector"].values
-    new_covariance_matrix = covariance_matrix.reindex(index= randomised_tickers, columns = randomised_tickers).values
-    n = len(randomised_tickers)
+    new_covariance_matrix = covariance_matrix.reindex(index=final_tickers, columns=final_tickers).values
+    n = len(final_tickers)
     weights_vector = cp.Variable(n)
-    target_task = cp.Minimize(cp.quad_form(weights_vector,new_covariance_matrix))
+    target_task = cp.Minimize(cp.quad_form(weights_vector, new_covariance_matrix))
 
     unique_sectors = list(set(sectors))
     sector_matrix = np.zeros((len(unique_sectors), n))
@@ -188,16 +171,14 @@ def optimise_portfolio(data_path):
     #Task 5
 
     optimal_weights = np.array(weights_vector.value)
-    optimal_weights = np.maximum(optimal_weights, 0)  # Set any tiny negative weights to 0
-    optimal_weights = optimal_weights / np.sum(optimal_weights)  # Renormalise so they sum to 1
+    optimal_weights = np.maximum(optimal_weights, 0)
+    optimal_weights = optimal_weights / np.sum(optimal_weights)
 
     inputs_df["optimal_weights"] = optimal_weights
-    expected_portfolio_return = returns @ optimal_weights #dot product of return and weights 
-
-    portfolio_volatility_daily = np.sqrt(optimal_weights.T @ new_covariance_matrix @ optimal_weights)
-    portfolio_volatility = portfolio_volatility_daily * np.sqrt(252)  # Annualise volatility
+    expected_portfolio_return = returns @ optimal_weights
+    portfolio_volatility = np.sqrt(optimal_weights.T @ new_covariance_matrix @ optimal_weights) * np.sqrt(252)
     portfolio_beta = betas @ optimal_weights
-    sharpe_ratio = expected_portfolio_return / portfolio_volatility
+    sharpe_ratio = expected_portfolio_return / portfolio_volatility if portfolio_volatility > 0 else 0
 
     # Validate constraints
     beta_deviation = abs(portfolio_beta - 1.0)
